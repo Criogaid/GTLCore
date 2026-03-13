@@ -5,6 +5,7 @@ import org.gtlcore.gtlcore.api.recipe.ingredient.LongIngredient;
 import org.gtlcore.gtlcore.common.machine.multiblock.part.ae.MEPatternBufferPartMachine;
 import org.gtlcore.gtlcore.config.AE2CalculationMode;
 import org.gtlcore.gtlcore.config.ConfigHolder;
+import org.gtlcore.gtlcore.utils.NumberUtils;
 
 import com.gregtechceu.gtceu.api.recipe.ingredient.FluidIngredient;
 import com.gregtechceu.gtceu.common.data.GTItems;
@@ -265,7 +266,7 @@ public class AEUtils {
 
                 } else remainingInputs.add(((AEItemKey) remaining).getItem());
             } else {
-                normalInputs.add(new GenericStack(stack.what(), stack.amount() * input.getMultiplier()));
+                normalInputs.add(new GenericStack(stack.what(), NumberUtils.saturatedMultiply(stack.amount(), input.getMultiplier())));
             }
         }
 
@@ -300,37 +301,69 @@ public class AEUtils {
                                                            long multiplier) {
         IPatternDetails.IInput[] inputs = originDetail.getInputs();
         KeyCounter[] inputHolder = new KeyCounter[inputs.length];
-        boolean found = true;
+        Object2LongOpenHashMap<AEKey> required = new Object2LongOpenHashMap<>();
 
+        // 预验证：聚合所有输入需求并检查库存是否充足
+        for (int x = 0; x < inputs.length; x++) {
+            AEKey key = inputs[x].getPossibleInputs()[0].what();
+            long amount = NumberUtils.saturatedMultiply(inputs[x].getMultiplier(), multiplier);
+            if (amount > 0) {
+                long old = required.getLong(key);
+                required.put(key, NumberUtils.saturatedAdd(old, amount));
+            }
+        }
+
+        for (var entry : required.object2LongEntrySet()) {
+            long requiredAmount = entry.getLongValue();
+            if (requiredAmount <= 0) continue;
+            long available = sourceInv.extract(entry.getKey(), requiredAmount, Actionable.SIMULATE);
+            if (available < requiredAmount) {
+                return null;
+            }
+        }
+
+        // 实际提取
         for (int x = 0; x < inputs.length; x++) {
             var list = inputHolder[x] = new KeyCounter();
             AEKey key = inputs[x].getPossibleInputs()[0].what();
-            long amount = inputs[x].getMultiplier() * multiplier;
+            long amount = NumberUtils.saturatedMultiply(inputs[x].getMultiplier(), multiplier);
             long extracted = AEUtils.extractTemplates(sourceInv, key, amount);
             list.add(key, extracted);
             if (extracted < amount) {
-                found = false;
+                CraftingCpuHelper.reinjectPatternInputs(sourceInv, inputHolder);
                 break;
             }
         }
 
-        if (!found) {
-            reinjectPatternInputs(sourceInv, inputHolder);
-            return null;
-        } else {
-            for (GenericStack output : originDetail.getOutputs()) {
-                expectedOutputs.add(output.what(), output.amount() * multiplier);
+        // 后验证：确保所有 inputHolder 都有效
+        for (var list : inputHolder) {
+            if (list == null) {
+                return null;
             }
-            return inputHolder;
+            boolean hasAny = false;
+            for (var entry : list) {
+                hasAny = true;
+                if (entry.getLongValue() <= 0) {
+                    return null;
+                }
+            }
+            if (!hasAny) {
+                return null;
+            }
         }
+
+        for (GenericStack output : originDetail.getOutputs()) {
+            expectedOutputs.add(output.what(), NumberUtils.saturatedMultiply(output.amount(), multiplier));
+        }
+        return inputHolder;
     }
 
     private static long extractTemplates(ICraftingInventory inv, AEKey key, long amount) {
-        if (amount == 0) return 0;
+        if (amount <= 0) return 0;
         long simEx = inv.extract(key, amount, Actionable.SIMULATE);
-        if (simEx == 0) return 0;
+        if (simEx <= 0) return 0;
         long extracted = inv.extract(key, simEx, Actionable.MODULATE);
-        if (extracted == 0 || extracted != simEx) {
+        if (extracted <= 0 || extracted != simEx) {
             throw new IllegalStateException("Failed to correctly extract whole number. Invalid simulation!");
         }
         return extracted;
@@ -350,7 +383,7 @@ public class AEUtils {
             long remainingMultiplier = inputs[x].getMultiplier();
             for (var template : getValidItemTemplates(sourceInv, inputs[x], level)) {
                 long extracted = CraftingCpuHelper.extractTemplates(sourceInv, template, remainingMultiplier);
-                list.add(template.key(), extracted * template.amount());
+                list.add(template.key(), NumberUtils.saturatedMultiply(extracted, template.amount()));
 
                 var containerItem = inputs[x].getRemainingKey(template.key());
                 if (containerItem != null) {
@@ -358,7 +391,7 @@ public class AEUtils {
                 }
 
                 remainingMultiplier -= extracted;
-                if (remainingMultiplier == 0)
+                if (remainingMultiplier <= 0)
                     break;
             }
 

@@ -7,6 +7,7 @@ import org.gtlcore.gtlcore.common.data.GTLMachines;
 import org.gtlcore.gtlcore.common.machine.multiblock.part.PaginationUIManager;
 import org.gtlcore.gtlcore.integration.ae2.AEUtils;
 import org.gtlcore.gtlcore.integration.lowdragmc.misc.MutableItemTransferList;
+import org.gtlcore.gtlcore.utils.OverflowLongCounter;
 
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.gui.fancy.ConfiguratorPanel;
@@ -69,6 +70,7 @@ import lombok.Setter;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.math.BigInteger;
 import java.util.*;
 
 import static org.gtlcore.gtlcore.integration.ae2.AEUtils.*;
@@ -152,6 +154,10 @@ public class MEMolecularAssemblerIOPartMachine extends MEIOPartMachine implement
     @Getter
     private final Object2LongOpenHashMap<AEKey> buffer;
 
+    private final Object2ObjectLinkedOpenHashMap<GenericStack, BigInteger> outputItemsOverflow;
+
+    private final Object2ObjectOpenHashMap<AEKey, BigInteger> bufferOverflow;
+
     @DescSynced
     private final Set<Long> proxies = new LongOpenHashSet();
     private final ReferenceSortedSet<IItemTransfer> proxyStackTransfers = new ReferenceLinkedOpenHashSet<>();
@@ -163,7 +169,9 @@ public class MEMolecularAssemblerIOPartMachine extends MEIOPartMachine implement
         patternSlotMap = HashBiMap.create();
         toolsSlotMap = new Int2ObjectOpenHashMap<>();
         outputItems = new Object2LongLinkedOpenHashMap<>();
+        outputItemsOverflow = new Object2ObjectLinkedOpenHashMap<>();
         buffer = new Object2LongOpenHashMap<>();
+        bufferOverflow = new Object2ObjectOpenHashMap<>();
         maHandler = new MECraftHandler(this);
         sharedToolsInventory = new ItemStackTransfer(9);
 
@@ -190,7 +198,7 @@ public class MEMolecularAssemblerIOPartMachine extends MEIOPartMachine implement
             }
 
             if (!requiredTools.isEmpty()) {
-                AEUtils.pushInputsToMEPatternBufferInventory(keyCounters, this.buffer::addTo);
+                AEUtils.pushInputsToMEPatternBufferInventory(keyCounters, this::gtlcore$addToBuffer);
                 this.meTrait.notifySelfIO();
                 return true;
             }
@@ -201,16 +209,59 @@ public class MEMolecularAssemblerIOPartMachine extends MEIOPartMachine implement
         for (var inputList : keyCounters) {
             for (var input : inputList) {
                 if (requireStack.what().equals(input.getKey())) {
-                    multiplier = input.getLongValue() / (requireStack.amount() * processingPattern.getInputs()[0].getMultiplier());
+                    long amountPerInput = requireStack.amount();
+                    long multiplierPerInput = processingPattern.getInputs()[0].getMultiplier();
+                    if (amountPerInput <= 0L || multiplierPerInput <= 0L ||
+                            amountPerInput > Long.MAX_VALUE / multiplierPerInput) {
+                        return false;
+                    }
+                    long perOperation = amountPerInput * multiplierPerInput;
+                    if (perOperation <= 0) {
+                        return false;
+                    }
+                    multiplier = input.getLongValue() / perOperation;
                     break;
                 }
             }
         }
         if (multiplier == 0) return false;
 
-        outputItems.addTo(output, multiplier);
+        gtlcore$addToOutput(output, multiplier);
         maHandler.notifyListeners();
         return true;
+    }
+
+    public void gtlcore$addToBuffer(AEKey key, long amount) {
+        OverflowLongCounter.addPositive(this.buffer, this.bufferOverflow, key, amount);
+    }
+
+    public void gtlcore$addToOutput(GenericStack key, long amount) {
+        OverflowLongCounter.addPositive(this.outputItems, this.outputItemsOverflow, key, amount);
+    }
+
+    public long gtlcore$consumeOutput(GenericStack key, long amount) {
+        return OverflowLongCounter.consume(this.outputItems, this.outputItemsOverflow, key, amount);
+    }
+
+    public void gtlcore$removeOutput(GenericStack key) {
+        this.outputItems.removeLong(key);
+        this.outputItemsOverflow.remove(key);
+    }
+
+    public List<GenericStack> gtlcore$getOutputKeysSnapshot() {
+        return new ObjectArrayList<>(this.outputItems.keySet());
+    }
+
+    private void gtlcore$rebalanceOutputOverflow() {
+        OverflowLongCounter.rebalance(this.outputItems, this.outputItemsOverflow);
+    }
+
+    private void gtlcore$rebalanceBufferOverflow() {
+        OverflowLongCounter.rebalance(this.buffer, this.bufferOverflow);
+    }
+
+    private boolean gtlcore$hasPendingBuffer() {
+        return !OverflowLongCounter.isEmpty(this.buffer, this.bufferOverflow);
     }
 
     @Override
@@ -413,23 +464,34 @@ public class MEMolecularAssemblerIOPartMachine extends MEIOPartMachine implement
     @Override
     public void saveCustomPersistedData(@NotNull CompoundTag tag, boolean forDrop) {
         super.saveCustomPersistedData(tag, forDrop);
-        if (buffer.isEmpty() && outputItems.isEmpty()) return;
+        if (OverflowLongCounter.isEmpty(buffer, bufferOverflow) &&
+                OverflowLongCounter.isEmpty(outputItems, outputItemsOverflow))
+            return;
         ListTag bufferTag = AEUtils.createListTag(AEKey::toTagGeneric, buffer);
         if (!bufferTag.isEmpty()) tag.put("buffer", bufferTag);
+        OverflowLongCounter.writeOverflow(tag, "gtlcore$bufferOverflow", bufferOverflow, AEKey::toTagGeneric);
 
         ListTag outputTag = AEUtils.createListTag(GenericStack::writeTag, outputItems);
         if (!outputTag.isEmpty()) tag.put("outputItems", outputTag);
+        OverflowLongCounter.writeOverflow(tag, "gtlcore$outputItemsOverflow", outputItemsOverflow, GenericStack::writeTag);
     }
 
     @Override
     public void loadCustomPersistedData(@NotNull CompoundTag tag) {
         super.loadCustomPersistedData(tag);
         buffer.clear();
+        bufferOverflow.clear();
         ListTag bufferTag = tag.getList("buffer", Tag.TAG_COMPOUND);
         AEUtils.loadInventory(bufferTag, AEKey::fromTagGeneric, buffer);
+        OverflowLongCounter.readOverflow(tag, "gtlcore$bufferOverflow", bufferOverflow, AEKey::fromTagGeneric);
+        gtlcore$rebalanceBufferOverflow();
 
+        outputItems.clear();
+        outputItemsOverflow.clear();
         ListTag outputTag = tag.getList("outputItems", Tag.TAG_COMPOUND);
         AEUtils.loadInventory(outputTag, GenericStack::readTag, outputItems);
+        OverflowLongCounter.readOverflow(tag, "gtlcore$outputItemsOverflow", outputItemsOverflow, GenericStack::readTag);
+        gtlcore$rebalanceOutputOverflow();
     }
 
     // ========================================
@@ -503,12 +565,16 @@ public class MEMolecularAssemblerIOPartMachine extends MEIOPartMachine implement
                 return TickRateModulation.SLEEP;
             }
 
-            if (buffer.isEmpty()) {
+            if (!gtlcore$hasPendingBuffer()) {
                 if (ticksSinceLastCall >= MEExtendedOutputPartMachineBase.MAX_FREQUENCY) {
                     isSleeping = true;
                     return TickRateModulation.SLEEP;
                 } else return TickRateModulation.SLOWER;
-            } else return reFunds(buffer, getMainNode().getGrid(), actionSource) ? TickRateModulation.URGENT : TickRateModulation.SLOWER;
+            } else {
+                boolean refunded = reFunds(buffer, getMainNode().getGrid(), actionSource);
+                gtlcore$rebalanceBufferOverflow();
+                return refunded ? TickRateModulation.URGENT : TickRateModulation.SLOWER;
+            }
         }
     }
 }

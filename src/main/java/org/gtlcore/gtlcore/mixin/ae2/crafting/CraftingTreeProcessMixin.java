@@ -107,7 +107,7 @@ public abstract class CraftingTreeProcessMixin implements ICraftingTreeProcess {
 
         for (GenericStack is : this.details.getOutputs()) {
             if (what.matches(is)) {
-                tot += is.amount();
+                tot = NumberUtils.saturatedAdd(tot, is.amount());
             }
         }
 

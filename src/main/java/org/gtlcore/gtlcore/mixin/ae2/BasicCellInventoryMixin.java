@@ -31,7 +31,8 @@ public abstract class BasicCellInventoryMixin {
 
     @Inject(method = "<init>", at = @At("RETURN"), remap = false)
     private void BasicCellInventory(IBasicCellItem cellType, ItemStack o, ISaveProvider container, CallbackInfo ci) {
-        this.maxItemTypes = this.cellType.getTotalTypes(this.i) * ConfigHolder.INSTANCE.cellType;
+        long scaledTypes = (long) this.cellType.getTotalTypes(this.i) * (long) ConfigHolder.INSTANCE.cellType;
+        this.maxItemTypes = scaledTypes > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) scaledTypes;
     }
 
     @Inject(method = "getBytesPerType", at = @At("HEAD"), remap = false, cancellable = true)

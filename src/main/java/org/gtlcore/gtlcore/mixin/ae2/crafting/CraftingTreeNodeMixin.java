@@ -123,7 +123,7 @@ public abstract class CraftingTreeNodeMixin implements ICraftingTreeNode {
                 requestedAmount -= extracted;
                 addContainerItems(template.key(), extracted, containerItems);
 
-                if (requestedAmount == 0) {
+                if (requestedAmount <= 0) {
                     return;
                 }
             }
@@ -156,7 +156,7 @@ public abstract class CraftingTreeNodeMixin implements ICraftingTreeNode {
                 pro.fastRequest(inv, times);
 
                 var available = inv.extract(this.what, totalRequestedItems, Actionable.MODULATE);
-                if (available != 0) {
+                if (available > 0) {
                     totalRequestedItems -= available;
 
                     if (totalRequestedItems <= 0) {
@@ -214,7 +214,7 @@ public abstract class CraftingTreeNodeMixin implements ICraftingTreeNode {
 
                             var available = child.extract(this.what, targetAmount, Actionable.MODULATE);
 
-                            if (available != 0) {
+                            if (available > 0) {
                                 child.applyDiff(inv);
                                 anySucceeded = true;
 
@@ -261,7 +261,7 @@ public abstract class CraftingTreeNodeMixin implements ICraftingTreeNode {
                 requestedAmount -= extracted;
                 addContainerItems(template.key(), extracted, containerItems);
 
-                if (requestedAmount == 0) {
+                if (requestedAmount <= 0) {
                     return;
                 }
             }
@@ -294,7 +294,7 @@ public abstract class CraftingTreeNodeMixin implements ICraftingTreeNode {
                 pro.ultraFastRequest(inv, times);
 
                 var available = inv.extract(this.what, totalRequestedItems, Actionable.MODULATE);
-                if (available != 0) {
+                if (available > 0) {
                     totalRequestedItems -= available;
 
                     if (totalRequestedItems <= 0) {
@@ -339,7 +339,7 @@ public abstract class CraftingTreeNodeMixin implements ICraftingTreeNode {
 
                         var available = child.extract(this.what, totalRequestedItems, Actionable.MODULATE);
 
-                        if (available != 0) {
+                        if (available > 0) {
                             child.applyDiff(inv);
 
                             totalRequestedItems -= available;

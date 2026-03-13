@@ -2,6 +2,7 @@ package org.gtlcore.gtlcore.common.machine.multiblock.part.ae;
 
 import org.gtlcore.gtlcore.api.recipe.ingredient.LongIngredient;
 import org.gtlcore.gtlcore.integration.ae2.AEUtils;
+import org.gtlcore.gtlcore.utils.NumberUtils;
 
 import com.gregtechceu.gtceu.api.capability.recipe.*;
 import com.gregtechceu.gtceu.api.machine.trait.MachineTrait;
@@ -149,7 +150,7 @@ public class MEPatternBufferRecipeHandlerTrait extends MachineTrait {
                 if (!inventory[slot].isActive()) continue;
                 Object2LongOpenHashMap<ItemStack> map = new Object2LongOpenHashMap<>();
                 for (var entry : Object2LongMaps.fastIterable(inventory[slot].getItemStackInputMap())) {
-                    map.addTo(entry.getKey(), entry.getLongValue());
+                    map.mergeLong(entry.getKey(), entry.getLongValue(), NumberUtils::saturatedAdd);
                 }
                 return map;
             }
@@ -181,7 +182,6 @@ public class MEPatternBufferRecipeHandlerTrait extends MachineTrait {
         @Override
         public List<Ingredient> meHandleRecipeOutputInner(List<Ingredient> left, boolean simulate) {
             if (simulate) return List.of();
-            final var buffer = getMachine().buffer;
             for (Ingredient ingredient : left) {
                 if (ingredient instanceof IntProviderIngredient intProvider) {
                     intProvider.setItemStacks(null);
@@ -192,7 +192,8 @@ public class MEPatternBufferRecipeHandlerTrait extends MachineTrait {
                 if (items.length != 0) {
                     ItemStack output = items[0];
                     if (!output.isEmpty()) {
-                        buffer.addTo(AEItemKey.of(output), ingredient instanceof LongIngredient longIngredient ? longIngredient.getActualAmount() : output.getCount());
+                        long amount = ingredient instanceof LongIngredient longIngredient ? longIngredient.getActualAmount() : output.getCount();
+                        getMachine().gtlcore$addToBuffer(AEItemKey.of(output), amount);
                     }
                 }
             }
@@ -249,7 +250,7 @@ public class MEPatternBufferRecipeHandlerTrait extends MachineTrait {
                 if (!inventory[slot].isActive()) continue;
                 Object2LongOpenHashMap<FluidStack> map = new Object2LongOpenHashMap<>();
                 for (var entry : Object2LongMaps.fastIterable(inventory[slot].getFluidStackInputMap())) {
-                    map.addTo(entry.getKey(), entry.getLongValue());
+                    map.mergeLong(entry.getKey(), entry.getLongValue(), NumberUtils::saturatedAdd);
                 }
                 return map;
             }
@@ -272,13 +273,12 @@ public class MEPatternBufferRecipeHandlerTrait extends MachineTrait {
         @Override
         public List<FluidIngredient> meHandleRecipeOutputInner(List<FluidIngredient> left, boolean simulate) {
             if (simulate) return List.of();
-            final var buffer = getMachine().buffer;
             for (FluidIngredient fluidIngredient : left) {
                 if (!fluidIngredient.isEmpty()) {
                     FluidStack[] fluids = fluidIngredient.getStacks();
                     if (fluids.length != 0) {
                         FluidStack output = fluids[0];
-                        buffer.addTo(AEFluidKey.of(output.getFluid()), output.getAmount());
+                        getMachine().gtlcore$addToBuffer(AEFluidKey.of(output.getFluid()), output.getAmount());
                     }
                 }
             }

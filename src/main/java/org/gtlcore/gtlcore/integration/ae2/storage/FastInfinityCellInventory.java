@@ -227,7 +227,7 @@ public class FastInfinityCellInventory implements StorageCell {
 
     @Override
     public long insert(AEKey what, long amount, Actionable mode, IActionSource source) {
-        if (amount == 0 || what == null) {
+        if (amount <= 0 || what == null) {
             return 0;
         }
 
@@ -263,6 +263,7 @@ public class FastInfinityCellInventory implements StorageCell {
 
     @Override
     public long extract(AEKey what, long amount, Actionable mode, IActionSource source) {
+        if (amount <= 0) return 0L;
         var currentAmount = getCellItems().get(what);
         if (currentAmount == null) {
             return 0L;

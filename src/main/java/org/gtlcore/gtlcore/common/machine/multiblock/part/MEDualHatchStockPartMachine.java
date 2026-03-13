@@ -11,6 +11,7 @@ import org.gtlcore.gtlcore.api.recipe.ingredient.LongIngredient;
 import org.gtlcore.gtlcore.client.gui.widget.AEDualConfigWidget;
 import org.gtlcore.gtlcore.config.ConfigHolder;
 import org.gtlcore.gtlcore.integration.ae2.AEUtils;
+import org.gtlcore.gtlcore.utils.NumberUtils;
 
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
@@ -491,7 +492,7 @@ public class MEDualHatchStockPartMachine extends MEBusPartMachine implements IDa
                 for (var key : configList) {
                     long extracted = aeNetwork.extract(key, Long.MAX_VALUE, Actionable.SIMULATE, getActionSource());
                     if (extracted > 0) {
-                        itemMap.addTo(key.toStack(), extracted);
+                        itemMap.mergeLong(key.toStack(), extracted, NumberUtils::saturatedAdd);
                     }
                 }
             }

@@ -1,5 +1,7 @@
 package org.gtlcore.gtlcore.integration.ae2.async;
 
+import org.gtlcore.gtlcore.utils.NumberUtils;
+
 import appeng.api.stacks.AEKey;
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 import lombok.Getter;
@@ -21,7 +23,7 @@ public final class AEAccumulator {
         for (var it = acc.entrySet().iterator(); it.hasNext();) {
             var e = it.next();
             long d = e.getValue().sumThenReset();
-            if (d != 0) buffer.addTo(e.getKey(), d);
+            if (d != 0) buffer.mergeLong(e.getKey(), d, NumberUtils::saturatedAdd);
             if (e.getValue().sum() == 0) it.remove();
         }
     }

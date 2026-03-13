@@ -30,7 +30,7 @@ public class CraftingPlanSummaryMixin {
 
     @Unique
     private static long gtlcore$calculateCraftTimes(AEKey item, ICraftingPlan job) {
-        var totalTimes = 0;
+        var totalTimes = 0L;
         for (var patternEntry : job.patternTimes().entrySet()) {
             var patternDetails = patternEntry.getKey();
             var timesUsed = patternEntry.getValue();

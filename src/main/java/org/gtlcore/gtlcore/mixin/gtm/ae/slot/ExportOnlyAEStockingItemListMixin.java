@@ -4,6 +4,7 @@ import org.gtlcore.gtlcore.api.machine.trait.MEStock.IMESlot;
 import org.gtlcore.gtlcore.api.machine.trait.MEStock.IOptimizedMEList;
 import org.gtlcore.gtlcore.api.recipe.ingredient.LongIngredient;
 import org.gtlcore.gtlcore.config.ConfigHolder;
+import org.gtlcore.gtlcore.utils.NumberUtils;
 
 import com.gregtechceu.gtceu.api.capability.recipe.IO;
 import com.gregtechceu.gtceu.api.machine.MetaMachine;
@@ -161,7 +162,7 @@ public abstract class ExportOnlyAEStockingItemListMixin extends ExportOnlyAEItem
             for (var key : gTLCore$configList) {
                 long extracted = aeNetwork.extract(key, Long.MAX_VALUE, Actionable.SIMULATE, this$0.getActionSource());
                 if (extracted > 0) {
-                    itemMap.addTo(key.toStack(), extracted);
+                    itemMap.mergeLong(key.toStack(), extracted, NumberUtils::saturatedAdd);
                 }
             }
         }

@@ -10,6 +10,8 @@ import org.gtlcore.gtlcore.integration.ae2.handler.MEBufferPatternHelper;
 import org.gtlcore.gtlcore.integration.ae2.handler.SlotCacheManager;
 import org.gtlcore.gtlcore.integration.ae2.widget.AEPatternViewExtendSlotWidget;
 import org.gtlcore.gtlcore.utils.GTLUtil;
+import org.gtlcore.gtlcore.utils.NumberUtils;
+import org.gtlcore.gtlcore.utils.OverflowLongCounter;
 import org.gtlcore.gtlcore.utils.Registries;
 
 import com.gregtechceu.gtceu.api.capability.recipe.*;
@@ -84,6 +86,7 @@ import lombok.Setter;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.math.BigInteger;
 import java.util.*;
 import java.util.stream.Stream;
 
@@ -179,6 +182,8 @@ public class MEPatternBufferPartMachine extends MEIOPartMachine implements IInte
     @Getter
     protected final Object2LongOpenHashMap<AEKey> buffer;
 
+    protected final Object2ObjectOpenHashMap<AEKey, BigInteger> bufferOverflow;
+
     // ========================================
     // Handlers
     // ========================================
@@ -233,6 +238,7 @@ public class MEPatternBufferPartMachine extends MEIOPartMachine implements IInte
 
         // Initialize inventories
         this.buffer = new Object2LongOpenHashMap<>();
+        this.bufferOverflow = new Object2ObjectOpenHashMap<>();
         this.patternInventory = new ItemStackTransfer(maxPatternCount);
         this.patternInventory.setFilter(AEUtils.PROCESS_FILTER);
         Arrays.setAll(internalInventory, InternalSlot::new);
@@ -340,6 +346,7 @@ public class MEPatternBufferPartMachine extends MEIOPartMachine implements IInte
             removeSlotFromGTRecipeCache(index);
             refundSlot(internalInv);
             AEUtils.reFunds(buffer, getMainNode().getGrid(), actionSource);
+            gtlcore$rebalanceBufferOverflow();
         }
 
         reCalculatePatternSlotMap();
@@ -365,7 +372,7 @@ public class MEPatternBufferPartMachine extends MEIOPartMachine implements IInte
         for (int i = 0; i < catalystItem.getSlots(); i++) {
             ItemStack stack = catalystItem.getStackInSlot(i);
             if (!stack.isEmpty()) {
-                itemCatalystInventory.mergeLong(AEItemKey.of(stack), stack.getCount(), Long::sum);
+                itemCatalystInventory.mergeLong(AEItemKey.of(stack), stack.getCount(), NumberUtils::saturatedAdd);
             }
         }
         internalInventory[slot].onContentsChanged.run();
@@ -378,7 +385,8 @@ public class MEPatternBufferPartMachine extends MEIOPartMachine implements IInte
         for (int i = 0; i < catalystFluid.getTanks(); i++) {
             FluidStack stack = catalystFluid.getFluidInTank(i);
             if (!stack.isEmpty()) {
-                fluidCatalystInventory.mergeLong(AEFluidKey.of(stack.getFluid()), stack.getAmount(), Long::sum);
+                fluidCatalystInventory.mergeLong(AEFluidKey.of(stack.getFluid()), stack.getAmount(),
+                        NumberUtils::saturatedAdd);
             }
         }
         internalInventory[slot].onContentsChanged.run();
@@ -445,6 +453,7 @@ public class MEPatternBufferPartMachine extends MEIOPartMachine implements IInte
 
         ListTag bufferTag = AEUtils.createListTag(AEKey::toTagGeneric, buffer);
         if (!bufferTag.isEmpty()) tag.put("buffer", bufferTag);
+        OverflowLongCounter.writeOverflow(tag, "gtlcore$bufferOverflow", bufferOverflow, AEKey::toTagGeneric);
     }
 
     @Override
@@ -490,8 +499,24 @@ public class MEPatternBufferPartMachine extends MEIOPartMachine implements IInte
             }
         } // Compatibility
 
+        buffer.clear();
+        bufferOverflow.clear();
         ListTag bufferTag = tag.getList("buffer", Tag.TAG_COMPOUND);
         AEUtils.loadInventory(bufferTag, AEKey::fromTagGeneric, buffer);
+        OverflowLongCounter.readOverflow(tag, "gtlcore$bufferOverflow", bufferOverflow, AEKey::fromTagGeneric);
+        gtlcore$rebalanceBufferOverflow();
+    }
+
+    public void gtlcore$addToBuffer(AEKey key, long amount) {
+        OverflowLongCounter.addPositive(this.buffer, this.bufferOverflow, key, amount);
+    }
+
+    private boolean gtlcore$hasPendingBuffer() {
+        return !OverflowLongCounter.isEmpty(this.buffer, this.bufferOverflow);
+    }
+
+    private void gtlcore$rebalanceBufferOverflow() {
+        OverflowLongCounter.rebalance(this.buffer, this.bufferOverflow);
     }
 
     public void copyFromTag(CompoundTag tag, ServerPlayer serverPlayer) {
@@ -709,6 +734,7 @@ public class MEPatternBufferPartMachine extends MEIOPartMachine implements IInte
 
             // Immediately try to process pending refunds
             AEUtils.reFunds(buffer, getMainNode().getGrid(), actionSource);
+            gtlcore$rebalanceBufferOverflow();
         }
     }
 
@@ -718,7 +744,7 @@ public class MEPatternBufferPartMachine extends MEIOPartMachine implements IInte
             var entry = it.next();
             long amount = entry.getLongValue();
             if (amount > 0) {
-                buffer.addTo(entry.getKey(), amount);
+                gtlcore$addToBuffer(entry.getKey(), amount);
                 it.remove();
             }
         }
@@ -728,7 +754,7 @@ public class MEPatternBufferPartMachine extends MEIOPartMachine implements IInte
             var entry = it.next();
             long amount = entry.getLongValue();
             if (amount > 0) {
-                buffer.addTo(entry.getKey(), amount);
+                gtlcore$addToBuffer(entry.getKey(), amount);
                 it.remove();
             }
         }
@@ -1040,9 +1066,9 @@ public class MEPatternBufferPartMachine extends MEIOPartMachine implements IInte
         private void add(AEKey what, long amount) {
             if (amount <= 0L) return;
             if (what instanceof AEItemKey itemKey) {
-                itemInventory.addTo(itemKey, amount);
+                itemInventory.mergeLong(itemKey, amount, NumberUtils::saturatedAdd);
             } else if (what instanceof AEFluidKey fluidKey) {
-                fluidInventory.addTo(fluidKey, amount);
+                fluidInventory.mergeLong(fluidKey, amount, NumberUtils::saturatedAdd);
             }
         }
 
@@ -1054,7 +1080,7 @@ public class MEPatternBufferPartMachine extends MEIOPartMachine implements IInte
                 if (amount <= 0) continue;
 
                 ItemStack stack = key.toStack(1);
-                itemInputMap.addTo(stack, amount);
+                itemInputMap.mergeLong(stack, amount, NumberUtils::saturatedAdd);
             }
             return itemInputMap;
         }
@@ -1067,7 +1093,7 @@ public class MEPatternBufferPartMachine extends MEIOPartMachine implements IInte
                 if (amount <= 0) continue;
 
                 FluidStack stack = FluidStack.create(key.getFluid(), 1);
-                fluidInputMap.addTo(stack, amount);
+                fluidInputMap.mergeLong(stack, amount, NumberUtils::saturatedAdd);
             }
             return fluidInputMap;
         }
@@ -1277,12 +1303,16 @@ public class MEPatternBufferPartMachine extends MEIOPartMachine implements IInte
                 return TickRateModulation.SLEEP;
             }
 
-            if (buffer.isEmpty()) {
+            if (!gtlcore$hasPendingBuffer()) {
                 if (ticksSinceLastCall >= MEExtendedOutputPartMachineBase.MAX_FREQUENCY) {
                     isSleeping = true;
                     return TickRateModulation.SLEEP;
                 } else return TickRateModulation.SLOWER;
-            } else return AEUtils.reFunds(buffer, getMainNode().getGrid(), actionSource) ? TickRateModulation.URGENT : TickRateModulation.SLOWER;
+            } else {
+                boolean refunded = AEUtils.reFunds(buffer, getMainNode().getGrid(), actionSource);
+                gtlcore$rebalanceBufferOverflow();
+                return refunded ? TickRateModulation.URGENT : TickRateModulation.SLOWER;
+            }
         }
     }
 

@@ -1,5 +1,7 @@
 package org.gtlcore.gtlcore.mixin.ae2;
 
+import org.gtlcore.gtlcore.utils.NumberUtils;
+
 import appeng.api.config.Actionable;
 import appeng.api.config.OperationMode;
 import appeng.api.config.Settings;
@@ -67,7 +69,8 @@ public abstract class IOPortBlockEntityMixin {
                     var possible = destination.insert(what, totalStackSize, Actionable.SIMULATE, this.mySrc);
 
                     if (possible > 0) {
-                        possible = Math.min(possible, itemsToMove * what.getAmountPerOperation());
+                        var amountPerOperation = Math.max(1L, what.getAmountPerOperation());
+                        possible = Math.min(possible, NumberUtils.saturatedMultiply(itemsToMove, amountPerOperation));
 
                         possible = src.extract(what, possible, Actionable.MODULATE, this.mySrc);
                         if (possible > 0) {
@@ -78,7 +81,8 @@ public abstract class IOPortBlockEntityMixin {
                             }
 
                             if (inserted > 0) {
-                                itemsToMove -= Math.max(1, inserted / what.getAmountPerOperation());
+                                itemsToMove -= Math.max(1L, inserted / amountPerOperation);
+                                itemsToMove = Math.max(0L, itemsToMove);
                                 didStuff = true;
                             }
 

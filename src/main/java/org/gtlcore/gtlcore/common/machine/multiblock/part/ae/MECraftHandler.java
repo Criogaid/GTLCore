@@ -12,7 +12,6 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.crafting.Ingredient;
 
 import appeng.api.stacks.AEItemKey;
-import it.unimi.dsi.fastutil.objects.Object2LongMaps;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 
 import java.util.Collections;
@@ -30,10 +29,10 @@ public class MECraftHandler extends NotifiableMAHandlerTrait {
 
     @Override
     public void handleRecipeOutput(GTRecipe recipe) {
-        final var buffer = getMachine().getBuffer();
         for (Content content : recipe.outputs.getOrDefault(ItemRecipeCapability.CAP, Collections.emptyList())) {
             if (content.content instanceof LongIngredient longIngredient) {
-                buffer.addTo(AEItemKey.of(longIngredient.getItems()[0]), longIngredient.getActualAmount());
+                getMachine().gtlcore$addToBuffer(AEItemKey.of(longIngredient.getItems()[0]),
+                        longIngredient.getActualAmount());
             }
         }
         getMachine().getMETrait().notifySelfIO();
@@ -44,25 +43,41 @@ public class MECraftHandler extends NotifiableMAHandlerTrait {
         GTRecipe output = GTRecipeBuilder.ofRaw().buildRawRecipe();
         List<Content> outputList = output.outputs.computeIfAbsent(ItemRecipeCapability.CAP, cap -> new ObjectArrayList<>());
         long remain = parallelAmount;
-        for (var it = Object2LongMaps.fastIterator(getMachine().getOutputItems()); it.hasNext() && remain > 0;) {
-            var entry = it.next();
-            var key = entry.getKey();
+        for (var key : getMachine().gtlcore$getOutputKeysSnapshot()) {
+            if (remain <= 0) break;
             if (!(key.what() instanceof AEItemKey aeItemKey)) {
-                it.remove();
+                getMachine().gtlcore$removeOutput(key);
                 continue;
             }
+
             Item item = aeItemKey.getItem();
-            long multiply = entry.getLongValue();
+            long multiply = getMachine().getOutputItems().getLong(key);
+            if (multiply <= 0L) {
+                getMachine().gtlcore$removeOutput(key);
+                continue;
+            }
 
             long extract = Math.min(multiply, remain);
+            long amountPerOutput = key.amount();
+            if (amountPerOutput <= 0L) {
+                continue;
+            }
+            long maxExtractForAmount = Long.MAX_VALUE / amountPerOutput;
+            if (maxExtractForAmount <= 0L) {
+                continue;
+            }
+            extract = Math.min(extract, maxExtractForAmount);
+            long ingredientAmount = extract * amountPerOutput;
 
-            var cont = new Content(LongIngredient.create(Ingredient.of(item), extract * key.amount()), ChanceLogic.getMaxChancedValue(), ChanceLogic.getMaxChancedValue(), 0, null, null);
+            var cont = new Content(LongIngredient.create(Ingredient.of(item), ingredientAmount),
+                    ChanceLogic.getMaxChancedValue(), ChanceLogic.getMaxChancedValue(), 0, null, null);
             outputList.add(cont);
 
-            remain -= extract;
-            multiply -= extract;
-            if (multiply == 0) it.remove();
-            else entry.setValue(multiply);
+            long consumed = getMachine().gtlcore$consumeOutput(key, extract);
+            if (consumed <= 0L) {
+                continue;
+            }
+            remain -= consumed;
         }
         if (outputList.isEmpty()) return null;
         else {

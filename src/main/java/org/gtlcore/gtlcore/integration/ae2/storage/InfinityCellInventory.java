@@ -220,7 +220,7 @@ public class InfinityCellInventory implements StorageCell {
 
     @Override
     public long insert(AEKey what, long amount, Actionable mode, IActionSource source) {
-        if (amount == 0 || !keyType.contains(what)) {
+        if (amount <= 0 || !keyType.contains(what)) {
             return 0;
         }
 
@@ -249,18 +249,20 @@ public class InfinityCellInventory implements StorageCell {
 
     @Override
     public long extract(AEKey what, long amount, Actionable mode, IActionSource source) {
+        if (amount <= 0) return 0L;
         var currentAmount = getCellItems().get(what);
         if (currentAmount == null) {
             return 0L;
         } else if (currentAmount.signum() > 0) {
             var extractAmount = BigInteger.valueOf(amount);
             if (currentAmount.compareTo(extractAmount) < 1) {
+                long extractedAmount = NumberUtils.getLongValue(currentAmount);
                 if (mode == Actionable.MODULATE) {
                     this.storedMap.remove(what);
                     lists.remove(what);
-                    this.saveChanges(-amount);
+                    this.saveChanges(-extractedAmount);
                 }
-                return currentAmount.longValue();
+                return extractedAmount;
             } else {
                 if (mode == Actionable.MODULATE) {
                     var sub = currentAmount.subtract(extractAmount);
