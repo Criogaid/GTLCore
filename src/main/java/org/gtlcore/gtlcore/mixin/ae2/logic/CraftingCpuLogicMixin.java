@@ -98,9 +98,9 @@ public abstract class CraftingCpuLogicMixin {
     @Unique
     private static final int GTLCORE_MAX_PULL_PER_CYCLE = 8;
 
-    /** 调试埋点开关：定位 ignoreMissing 持久化链路问题时开启。 */
+    /** 调试埋点开关：定位 ignoreMissing 持久化链路问题时按需开启。 */
     @Unique
-    private static final boolean GTLCORE_DEBUG_IGNORE_MISSING = true;
+    private static final boolean GTLCORE_DEBUG_IGNORE_MISSING = false;
 
     @Unique
     private int gtlcore$pullNoExtractCycles;
@@ -142,7 +142,7 @@ public abstract class CraftingCpuLogicMixin {
     private void gtlcore$debug(String format, Object... args) {
         if (!GTLCORE_DEBUG_IGNORE_MISSING) return;
         String message = String.format(format, args);
-        AELog.info("[GTLCore][IgnoreMissing][CPU %s] %s", gtlcore$cpuId(), message);
+        AELog.debug("[GTLCore][IgnoreMissing][CPU %s] %s", gtlcore$cpuId(), message);
     }
 
     // ========== ignoreMissing: NBT 持久化 ==========
@@ -530,12 +530,27 @@ public abstract class CraftingCpuLogicMixin {
             KeyCounter expectedOutputs = new KeyCounter(), expectedContainerItems = new KeyCounter();
             KeyCounter[] craftingContainer = null;
             boolean needExtract = true;
+            long autoExpandBatch = 1L;
 
             for (var provider : craftingService.getProviders(details)) {
                 final boolean autoExpand = isProcessing && (provider instanceof IMEPatternPartMachine || provider instanceof IMECraftIOPart);
 
                 if (needExtract) {
-                    craftingContainer = isProcessing ? (autoExpand ? AEUtils.extractForProcessingPattern((AEProcessingPattern) details, inventory, expectedOutputs, taskProgress.getValue()) : AEUtils.extractForProcessingPattern((AEProcessingPattern) details, inventory, expectedOutputs)) : AEUtils.extractForCraftPattern(details, inventory, level, expectedOutputs, expectedContainerItems);
+                    if (isProcessing && autoExpand) {
+                        var extractionResult = AEUtils.extractForAutoExpandedProcessingPattern((AEProcessingPattern) details,
+                                inventory, expectedOutputs, taskProgress.getValue());
+                        if (extractionResult == null) {
+                            break;
+                        }
+                        autoExpandBatch = extractionResult.appliedMultiplier();
+                        craftingContainer = extractionResult.inputHolder();
+                    } else if (isProcessing) {
+                        autoExpandBatch = 1L;
+                        craftingContainer = AEUtils.extractForProcessingPattern((AEProcessingPattern) details, inventory, expectedOutputs);
+                    } else {
+                        autoExpandBatch = 1L;
+                        craftingContainer = AEUtils.extractForCraftPattern(details, inventory, level, expectedOutputs, expectedContainerItems);
+                    }
                     needExtract = false;
                     if (craftingContainer == null) {
                         break;
@@ -568,8 +583,11 @@ public abstract class CraftingCpuLogicMixin {
 
                     // 1) AutoExpand
                     if (autoExpand) {
-                        taskProgress.setValue(0);
-                        it.remove();
+                        long remaining = taskProgress.getValue() - autoExpandBatch;
+                        taskProgress.setValue(remaining);
+                        if (remaining <= 0L) {
+                            it.remove();
+                        }
                         continue taskLoop;
                     }
 

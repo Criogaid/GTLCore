@@ -295,22 +295,98 @@ public class AEUtils {
         return extractForProcessingPattern(originDetail, sourceInv, expectedOutputs, 1);
     }
 
-    public static KeyCounter[] extractForProcessingPattern(AEProcessingPattern originDetail,
-                                                           ICraftingInventory sourceInv,
-                                                           KeyCounter expectedOutputs,
-                                                           long multiplier) {
+    /**
+     * 处理样板单轮提取结果。
+     *
+     * @param inputHolder 按输入槽位对齐的已提取内容；零消耗槽位保留空计数器，不参与后验证。
+     * @param appliedMultiplier 本轮实际应用的批次数；自动翻倍路径下已按 long 安全上界裁剪。
+     */
+    public record ProcessingPatternExtractionResult(KeyCounter[] inputHolder, long appliedMultiplier) {}
+
+    private static long getPrimaryInputAmountPerOperation(IPatternDetails.IInput input) {
+        GenericStack[] possibleInputs = input.getPossibleInputs();
+        if (possibleInputs.length == 0) {
+            return 0L;
+        }
+        return NumberUtils.saturatedMultiply(possibleInputs[0].amount(), input.getMultiplier());
+    }
+
+    public static @Nullable ProcessingPatternExtractionResult extractForAutoExpandedProcessingPattern(AEProcessingPattern originDetail,
+                                                                                                      ICraftingInventory sourceInv,
+                                                                                                      KeyCounter expectedOutputs,
+                                                                                                      long requestedMultiplier) {
+        return extractForProcessingPatternInternal(originDetail, sourceInv, expectedOutputs, requestedMultiplier, true);
+    }
+
+    private static @Nullable ProcessingPatternExtractionResult extractForProcessingPatternInternal(AEProcessingPattern originDetail,
+                                                                                                   ICraftingInventory sourceInv,
+                                                                                                   KeyCounter expectedOutputs,
+                                                                                                   long requestedMultiplier,
+                                                                                                   boolean clampToSafeMultiplier) {
+        if (requestedMultiplier <= 0L) {
+            return null;
+        }
+
         IPatternDetails.IInput[] inputs = originDetail.getInputs();
         KeyCounter[] inputHolder = new KeyCounter[inputs.length];
-        Object2LongOpenHashMap<AEKey> required = new Object2LongOpenHashMap<>();
+        Object2LongOpenHashMap<AEKey> required = new Object2LongOpenHashMap<>(inputs.length);
+        AEKey[] inputKeys = new AEKey[inputs.length];
+        long[] inputAmountsPerOperation = new long[inputs.length];
+        boolean[] inputRequiresExtraction = new boolean[inputs.length];
 
-        // 预验证：聚合所有输入需求并检查库存是否充足
         for (int x = 0; x < inputs.length; x++) {
-            AEKey key = inputs[x].getPossibleInputs()[0].what();
-            long amount = NumberUtils.saturatedMultiply(inputs[x].getMultiplier(), multiplier);
-            if (amount > 0) {
-                long old = required.getLong(key);
-                required.put(key, NumberUtils.saturatedAdd(old, amount));
+            GenericStack[] possibleInputs = inputs[x].getPossibleInputs();
+            if (possibleInputs.length == 0) {
+                return null;
             }
+
+            AEKey key = possibleInputs[0].what();
+            long amountPerOperation = getPrimaryInputAmountPerOperation(inputs[x]);
+            inputKeys[x] = key;
+            inputAmountsPerOperation[x] = amountPerOperation;
+            if (amountPerOperation <= 0L) {
+                continue;
+            }
+
+            inputRequiresExtraction[x] = true;
+            // 这里按 AEKey 先做 (a + b) * m，而不是各槽位分别做 a * m + b * m。
+            // 对正常整数算术二者等价，但执行期的安全批次、库存预检和真实扣料都是按“同 key 总量”完成；
+            // 先聚合同类项才能让重复 key 的上界判断与后续实际提取保持同一口径。
+            required.put(key, NumberUtils.saturatedAdd(required.getLong(key), amountPerOperation));
+        }
+
+        long appliedMultiplier = requestedMultiplier;
+        if (clampToSafeMultiplier && requestedMultiplier > 1L) {
+            long maxAmountPerOperation = 0L;
+            // AEProcessingPattern 在这条执行路径上会按 AEKey 汇总后再提取/记账，
+            // 因此安全批次也必须基于“同类项合并后的每操作总量”来取上界。
+            for (var entry : required.object2LongEntrySet()) {
+                maxAmountPerOperation = Math.max(maxAmountPerOperation, entry.getLongValue());
+            }
+
+            Object2LongOpenHashMap<AEKey> outputPerOperation = new Object2LongOpenHashMap<>(originDetail.getOutputs().length);
+            for (GenericStack output : originDetail.getOutputs()) {
+                long amount = output.amount();
+                if (amount <= 0L) {
+                    continue;
+                }
+                AEKey key = output.what();
+                long aggregatedAmount = NumberUtils.saturatedAdd(outputPerOperation.getLong(key), amount);
+                outputPerOperation.put(key, aggregatedAmount);
+                maxAmountPerOperation = Math.max(maxAmountPerOperation, aggregatedAmount);
+            }
+
+            if (maxAmountPerOperation > 0L) {
+                appliedMultiplier = Math.min(appliedMultiplier, Long.MAX_VALUE / maxAmountPerOperation);
+            }
+        }
+
+        if (appliedMultiplier <= 0L) {
+            return null;
+        }
+
+        for (var entry : required.object2LongEntrySet()) {
+            entry.setValue(NumberUtils.saturatedMultiply(entry.getLongValue(), appliedMultiplier));
         }
 
         for (var entry : required.object2LongEntrySet()) {
@@ -325,10 +401,16 @@ public class AEUtils {
         // 实际提取
         for (int x = 0; x < inputs.length; x++) {
             var list = inputHolder[x] = new KeyCounter();
-            AEKey key = inputs[x].getPossibleInputs()[0].what();
-            long amount = NumberUtils.saturatedMultiply(inputs[x].getMultiplier(), multiplier);
-            long extracted = AEUtils.extractTemplates(sourceInv, key, amount);
-            list.add(key, extracted);
+            GenericStack[] possibleInputs = inputs[x].getPossibleInputs();
+            if (possibleInputs.length == 0) {
+                return null;
+            }
+            if (!inputRequiresExtraction[x]) {
+                continue;
+            }
+            long amount = NumberUtils.saturatedMultiply(inputAmountsPerOperation[x], appliedMultiplier);
+            long extracted = AEUtils.extractTemplates(sourceInv, inputKeys[x], amount);
+            list.add(inputKeys[x], extracted);
             if (extracted < amount) {
                 CraftingCpuHelper.reinjectPatternInputs(sourceInv, inputHolder);
                 break;
@@ -336,9 +418,13 @@ public class AEUtils {
         }
 
         // 后验证：确保所有 inputHolder 都有效
-        for (var list : inputHolder) {
+        for (int x = 0; x < inputHolder.length; x++) {
+            var list = inputHolder[x];
             if (list == null) {
                 return null;
+            }
+            if (!inputRequiresExtraction[x]) {
+                continue;
             }
             boolean hasAny = false;
             for (var entry : list) {
@@ -353,9 +439,18 @@ public class AEUtils {
         }
 
         for (GenericStack output : originDetail.getOutputs()) {
-            expectedOutputs.add(output.what(), NumberUtils.saturatedMultiply(output.amount(), multiplier));
+            expectedOutputs.add(output.what(), NumberUtils.saturatedMultiply(output.amount(), appliedMultiplier));
         }
-        return inputHolder;
+        return new ProcessingPatternExtractionResult(inputHolder, appliedMultiplier);
+    }
+
+    public static KeyCounter[] extractForProcessingPattern(AEProcessingPattern originDetail,
+                                                           ICraftingInventory sourceInv,
+                                                           KeyCounter expectedOutputs,
+                                                           long multiplier) {
+        ProcessingPatternExtractionResult result = extractForProcessingPatternInternal(originDetail, sourceInv, expectedOutputs,
+                multiplier, false);
+        return result == null ? null : result.inputHolder();
     }
 
     private static long extractTemplates(ICraftingInventory inv, AEKey key, long amount) {
