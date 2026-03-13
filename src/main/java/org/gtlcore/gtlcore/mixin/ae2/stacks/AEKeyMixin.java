@@ -27,7 +27,7 @@ public abstract class AEKeyMixin {
      */
     @Overwrite(remap = false)
     public final CompoundTag toTagGeneric() {
-        return gTLCore$tagGenericCache != null ? gTLCore$tagGenericCache : gTLCore$saveAndReturnTagGeneric();
+        return gTLCore$tagGenericCache != null ? gTLCore$tagGenericCache.copy() : gTLCore$saveAndReturnTagGeneric();
     }
 
     @Unique
@@ -35,6 +35,6 @@ public abstract class AEKeyMixin {
         CompoundTag tag = this.toTag();
         tag.putString("#c", this.getType().getId().toString());
         this.gTLCore$tagGenericCache = tag;
-        return tag;
+        return tag.copy();
     }
 }

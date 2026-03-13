@@ -3,6 +3,7 @@ package org.gtlcore.gtlcore.mixin.ae2.crafting;
 import org.gtlcore.gtlcore.integration.ae2.crafting.ICraftingCalculation;
 import org.gtlcore.gtlcore.integration.ae2.crafting.ICraftingTreeNode;
 import org.gtlcore.gtlcore.integration.ae2.crafting.ICraftingTreeProcess;
+import org.gtlcore.gtlcore.utils.NumberUtils;
 
 import appeng.api.config.Actionable;
 import appeng.api.crafting.IPatternDetails;
@@ -50,7 +51,7 @@ public abstract class CraftingTreeProcessMixin implements ICraftingTreeProcess {
         var containerItems = this.containerItems ? new KeyCounter() : null;
 
         for (var entry : this.nodes.entrySet()) {
-            ((ICraftingTreeNode) entry.getKey()).fastRequest(inv, entry.getValue() * times, containerItems);
+            ((ICraftingTreeNode) entry.getKey()).fastRequest(inv, NumberUtils.saturatedMultiply(entry.getValue(), times), containerItems);
         }
 
         onSucceed(inv, times, containerItems);
@@ -64,7 +65,7 @@ public abstract class CraftingTreeProcessMixin implements ICraftingTreeProcess {
         var containerItems = this.containerItems ? new KeyCounter() : null;
 
         for (var entry : this.nodes.entrySet()) {
-            ((ICraftingTreeNode) entry.getKey()).ultraFastRequest(inv, entry.getValue() * times, containerItems);
+            ((ICraftingTreeNode) entry.getKey()).ultraFastRequest(inv, NumberUtils.saturatedMultiply(entry.getValue(), times), containerItems);
         }
 
         onSucceed(inv, times, containerItems);
@@ -80,7 +81,7 @@ public abstract class CraftingTreeProcessMixin implements ICraftingTreeProcess {
         }
 
         for (var out : this.details.getOutputs()) {
-            inv.insert(out.what(), out.amount() * times, Actionable.MODULATE);
+            inv.insert(out.what(), NumberUtils.saturatedMultiply(out.amount(), times), Actionable.MODULATE);
         }
 
         inv.addCrafting(details, times);

@@ -3,6 +3,7 @@ package org.gtlcore.gtlcore.mixin.ae2.crafting;
 import org.gtlcore.gtlcore.integration.ae2.crafting.ICraftingCalculation;
 import org.gtlcore.gtlcore.integration.ae2.crafting.ICraftingTreeNode;
 import org.gtlcore.gtlcore.integration.ae2.crafting.ICraftingTreeProcess;
+import org.gtlcore.gtlcore.utils.NumberUtils;
 
 import net.minecraft.world.level.Level;
 
@@ -131,22 +132,26 @@ public abstract class CraftingTreeNodeMixin implements ICraftingTreeNode {
         addContainerItems(what, requestedAmount, containerItems);
 
         if (this.canEmit) {
-            inv.emitItems(this.what, this.amount * requestedAmount);
+            inv.emitItems(this.what, NumberUtils.saturatedMultiply(this.amount, requestedAmount));
             return;
         }
 
         buildChildPatterns();
-        long totalRequestedItems = requestedAmount * this.amount;
+        long totalRequestedItems = NumberUtils.saturatedMultiply(requestedAmount, this.amount);
         if (this.nodes.size() == 1) {
             final ICraftingTreeProcess pro = (ICraftingTreeProcess) (this.nodes.get(0));
             var craftedPerPattern = pro.getOutputCountTest(this.what);
+            if (craftedPerPattern <= 0) {
+                pro.setPossible(false);
+                totalRequestedItems = 0;
+            }
 
             while (pro.getPossible() && totalRequestedItems > 0) {
                 long times;
                 if (pro.limitsQuantityTest()) {
                     times = 1;
                 } else {
-                    times = (totalRequestedItems + craftedPerPattern - 1) / craftedPerPattern;
+                    times = NumberUtils.saturatedAdd(totalRequestedItems, craftedPerPattern - 1) / craftedPerPattern;
                 }
                 pro.fastRequest(inv, times);
 
@@ -196,7 +201,12 @@ public abstract class CraftingTreeNodeMixin implements ICraftingTreeNode {
 
                     try {
                         var craftedPerPattern = pro.getOutputCountTest(this.what);
-                        long times = pro.limitsQuantityTest() ? 1 : (targetAmount + craftedPerPattern - 1) / craftedPerPattern;
+                        if (craftedPerPattern <= 0) {
+                            pro.setPossible(false);
+                            continue;
+                        }
+                        long times = pro.limitsQuantityTest() ? 1 :
+                                (NumberUtils.saturatedAdd(targetAmount, craftedPerPattern - 1) / craftedPerPattern);
 
                         if (times > 0) {
                             final ChildCraftingSimulationState child = new ChildCraftingSimulationState(inv);
@@ -260,22 +270,26 @@ public abstract class CraftingTreeNodeMixin implements ICraftingTreeNode {
         addContainerItems(what, requestedAmount, containerItems);
 
         if (this.canEmit) {
-            inv.emitItems(this.what, this.amount * requestedAmount);
+            inv.emitItems(this.what, NumberUtils.saturatedMultiply(this.amount, requestedAmount));
             return;
         }
 
         buildChildPatterns();
-        long totalRequestedItems = requestedAmount * this.amount;
+        long totalRequestedItems = NumberUtils.saturatedMultiply(requestedAmount, this.amount);
         if (this.nodes.size() == 1) {
             final ICraftingTreeProcess pro = (ICraftingTreeProcess) (this.nodes.get(0));
             var craftedPerPattern = pro.getOutputCountTest(this.what);
+            if (craftedPerPattern <= 0) {
+                pro.setPossible(false);
+                totalRequestedItems = 0;
+            }
 
             while (pro.getPossible() && totalRequestedItems > 0) {
                 long times;
                 if (pro.limitsQuantityTest()) {
                     times = 1;
                 } else {
-                    times = (totalRequestedItems + craftedPerPattern - 1) / craftedPerPattern;
+                    times = NumberUtils.saturatedAdd(totalRequestedItems, craftedPerPattern - 1) / craftedPerPattern;
                 }
                 pro.ultraFastRequest(inv, times);
 
@@ -312,7 +326,12 @@ public abstract class CraftingTreeNodeMixin implements ICraftingTreeNode {
 
                 try {
                     var craftedPerPattern = pro.getOutputCountTest(this.what);
-                    long times = pro.limitsQuantityTest() ? 1 : (totalRequestedItems + craftedPerPattern - 1) / craftedPerPattern;
+                    if (craftedPerPattern <= 0) {
+                        pro.setPossible(false);
+                        continue;
+                    }
+                    long times = pro.limitsQuantityTest() ? 1 :
+                            (NumberUtils.saturatedAdd(totalRequestedItems, craftedPerPattern - 1) / craftedPerPattern);
 
                     if (times > 0) {
                         final ChildCraftingSimulationState child = new ChildCraftingSimulationState(inv);
