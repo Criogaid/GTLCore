@@ -2,6 +2,9 @@ package org.gtlcore.gtlcore.api.item.tool.ae2.patternTool;
 
 import org.gtlcore.gtlcore.GTLCore;
 
+import com.gregtechceu.gtceu.common.data.GTItems;
+import com.gregtechceu.gtceu.common.item.IntCircuitBehaviour;
+
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -19,19 +22,60 @@ import java.util.List;
 
 public class Ae2BaseProcessingPatternHelper {
 
+    public enum ScaleFailurePart {
+        NONE,
+        INPUT,
+        OUTPUT
+    }
+
+    public enum ScaleFailureReason {
+        NONE,
+        INVALID_SCALE,
+        DIVIDE_NOT_DIVISIBLE,
+        MULTIPLY_LIMIT_EXCEEDED
+    }
+
+    public record ScaleValidationResult(ScaleFailurePart part, ScaleFailureReason reason) {
+
+        public static final ScaleValidationResult SUCCESS = new ScaleValidationResult(ScaleFailurePart.NONE, ScaleFailureReason.NONE);
+
+        public boolean success() {
+            return reason == ScaleFailureReason.NONE;
+        }
+    }
+
     // 乘或除 输入解码后样板，输出编码后样板
     public static ItemStack multiplyScale(int scale, boolean div, AEProcessingPattern patternDetail, long maxItemStack, long maxFluidStack) {
+        return multiplyScaleSeparated(scale, div, scale, div, patternDetail, maxItemStack, maxFluidStack);
+    }
+
+    // 乘或除 输入和输出可分别设置
+    public static ItemStack multiplyScaleSeparated(int inputScale, boolean inputDiv, int outputScale, boolean outputDiv, AEProcessingPattern patternDetail, long maxItemStack, long maxFluidStack) {
+        ScaleValidationResult validationResult = validateScaleSeparated(inputScale, inputDiv, outputScale, outputDiv, patternDetail, maxItemStack, maxFluidStack);
+        if (!validationResult.success()) {
+            GTLCore.LOGGER.info("内部错误：无法整除 或 乘数过大");
+            return null;
+        }
+
         var input = patternDetail.getSparseInputs();
         var output = patternDetail.getOutputs();
-        if (checkModify(input, scale, div, maxItemStack, maxFluidStack) && checkModify(output, scale, div, maxItemStack, maxFluidStack)) {
-            var mulInput = new GenericStack[input.length];
-            var mulOutput = new GenericStack[output.length];
-            modifyStacks(input, mulInput, scale, div);
-            modifyStacks(output, mulOutput, scale, div);
-            return PatternDetailsHelper.encodeProcessingPattern(mulInput, mulOutput);
+        var mulInput = new GenericStack[input.length];
+        var mulOutput = new GenericStack[output.length];
+        modifyStacks(input, mulInput, inputScale, inputDiv);
+        modifyStacks(output, mulOutput, outputScale, outputDiv);
+        return PatternDetailsHelper.encodeProcessingPattern(mulInput, mulOutput);
+    }
+
+    public static ScaleValidationResult validateScaleSeparated(int inputScale, boolean inputDiv, int outputScale, boolean outputDiv, AEProcessingPattern patternDetail, long maxItemStack, long maxFluidStack) {
+        ScaleFailureReason inputFailure = checkModifyFailure(patternDetail.getSparseInputs(), inputScale, inputDiv, maxItemStack, maxFluidStack);
+        if (inputFailure != ScaleFailureReason.NONE) {
+            return new ScaleValidationResult(ScaleFailurePart.INPUT, inputFailure);
         }
-        GTLCore.LOGGER.info("内部错误：无法整除 或 乘数过大");
-        return null;
+        ScaleFailureReason outputFailure = checkModifyFailure(patternDetail.getOutputs(), outputScale, outputDiv, maxItemStack, maxFluidStack);
+        if (outputFailure != ScaleFailureReason.NONE) {
+            return new ScaleValidationResult(ScaleFailurePart.OUTPUT, outputFailure);
+        }
+        return ScaleValidationResult.SUCCESS;
     }
 
     // 从样板物品解码样板
@@ -66,50 +110,95 @@ public class Ae2BaseProcessingPatternHelper {
     }
 
     private static boolean itemMatch(GenericStack genericStack, List<Item> matchItemList) {
+        if (!(genericStack.what() instanceof AEItemKey itemKey)) {
+            return false;
+        }
         for (Item item : matchItemList) {
-            if (genericStack.what().equals(AEItemKey.of(item))) {
+            if (itemKey.getItem() == item) {
                 return true;
             }
         }
         return false;
     }
 
-    private static boolean checkModify(GenericStack[] stacks, int scale, boolean div, long maxItemStack, long maxFluidStack) {
+    private static ScaleFailureReason checkModifyFailure(GenericStack[] stacks, int scale, boolean div, long maxItemStack, long maxFluidStack) {
+        if (scale <= 0) {
+            return ScaleFailureReason.INVALID_SCALE;
+        }
         if (div) {
             for (var stack : stacks) {
                 if (stack != null) {
+                    if (isScaleBlacklisted(stack)) {
+                        continue;
+                    }
                     if (stack.amount() % scale != 0) {
-                        return false;
+                        return ScaleFailureReason.DIVIDE_NOT_DIVISIBLE;
                     }
                 }
             }
         } else {
             for (var stack : stacks) {
                 if (stack != null) {
+                    if (isScaleBlacklisted(stack)) {
+                        continue;
+                    }
+                    long amount = stack.amount();
                     if (stack.what().getType().equals(AEKeyType.fluids())) {
-                        long upper = maxFluidStack * stack.what().getAmountPerUnit();
-                        if (stack.amount() * scale > upper) {
-                            return false;
+                        long upper = safeMultiply(maxFluidStack, stack.what().getAmountPerUnit());
+                        if (willExceedAfterScale(amount, scale, upper)) {
+                            return ScaleFailureReason.MULTIPLY_LIMIT_EXCEEDED;
                         }
                     }
                     if (stack.what().getType().equals(AEKeyType.items())) {
-                        long upper = maxItemStack * stack.what().getAmountPerUnit();
-                        if (stack.amount() * scale > upper) {
-                            return false;
+                        long upper = safeMultiply(maxItemStack, stack.what().getAmountPerUnit());
+                        if (willExceedAfterScale(amount, scale, upper)) {
+                            return ScaleFailureReason.MULTIPLY_LIMIT_EXCEEDED;
                         }
                     }
                 }
             }
         }
-        return true;
+        return ScaleFailureReason.NONE;
+    }
+
+    private static long safeMultiply(long left, long right) {
+        if (left <= 0 || right <= 0) {
+            return 0L;
+        }
+        if (left > Long.MAX_VALUE / right) {
+            return Long.MAX_VALUE;
+        }
+        return left * right;
+    }
+
+    private static boolean willExceedAfterScale(long amount, int scale, long upper) {
+        if (amount <= 0) {
+            return false;
+        }
+        return amount > upper / scale;
     }
 
     private static void modifyStacks(GenericStack[] stacks, GenericStack[] des, int scale, boolean div) {
         for (int i = 0; i < stacks.length; i++) {
             if (stacks[i] != null) {
-                long amt = div ? stacks[i].amount() / scale : stacks[i].amount() * scale;
+                long amt = stacks[i].amount();
+                if (!isScaleBlacklisted(stacks[i])) {
+                    amt = div ? stacks[i].amount() / scale : stacks[i].amount() * scale;
+                }
                 des[i] = new GenericStack(stacks[i].what(), amt);
             }
         }
+    }
+
+    private static boolean isScaleBlacklisted(GenericStack stack) {
+        if (stack == null) {
+            return false;
+        }
+        if (!(stack.what() instanceof AEItemKey itemKey)) {
+            return false;
+        }
+        ItemStack itemStack = itemKey.toStack();
+        return GTItems.INTEGRATED_CIRCUIT.is(itemStack.getItem()) &&
+                IntCircuitBehaviour.getCircuitConfiguration(itemStack) >= 0;
     }
 }

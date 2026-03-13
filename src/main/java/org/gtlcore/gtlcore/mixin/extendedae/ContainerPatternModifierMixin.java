@@ -10,6 +10,6 @@ public abstract class ContainerPatternModifierMixin {
 
     @ModifyConstant(method = "checkModify", remap = false, constant = @Constant(longValue = 999999L))
     private long modifyContainer(long constant) {
-        return Integer.MAX_VALUE;
+        return Long.MAX_VALUE;
     }
 }

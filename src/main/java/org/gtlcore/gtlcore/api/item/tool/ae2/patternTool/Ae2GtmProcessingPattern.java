@@ -16,11 +16,8 @@ import java.util.List;
 
 public class Ae2GtmProcessingPattern extends Ae2BaseProcessingPattern {
 
-    public final GTRecipe recipe;
-
-    public Ae2GtmProcessingPattern(ItemStack patternStack, ServerPlayer serverPlayer, GTRecipe recipe) {
+    public Ae2GtmProcessingPattern(ItemStack patternStack, ServerPlayer serverPlayer) {
         super(patternStack, serverPlayer);
-        this.recipe = recipe;
     }
 
     public static Ae2GtmProcessingPattern of(GTRecipe recipe, ServerPlayer serverPlayer) {
@@ -51,7 +48,7 @@ public class Ae2GtmProcessingPattern extends Ae2BaseProcessingPattern {
         }
 
         ItemStack patternStack = PatternDetailsHelper.encodeProcessingPattern(Inputs, Outputs);
-        return new Ae2GtmProcessingPattern(patternStack, serverPlayer, recipe);
+        return new Ae2GtmProcessingPattern(patternStack, serverPlayer);
     }
     // 将模头，模具加入忽略名单
     // this.PATTERNIGNOREITEMS.addAll(Arrays.stream(GTItems.SHAPE_MOLDS).map(ItemProviderEntry::asItem).toList());

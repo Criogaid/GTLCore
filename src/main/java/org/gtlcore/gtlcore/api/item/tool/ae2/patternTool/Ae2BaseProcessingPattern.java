@@ -21,7 +21,6 @@ import java.util.Objects;
 public class Ae2BaseProcessingPattern {
 
     public ItemStack patternStack; // 样板itemStack
-    public int scale; // scale是此样板相对于配方的倍数，不能乱改！！！
     public ServerPlayer serverPlayer;
     /*
      * 此处一个对象就是一个样板，因此过滤器决定某些物品/流体会不会在此样板中出现
@@ -63,13 +62,9 @@ public class Ae2BaseProcessingPattern {
         }
     }
 
-    public void setScale(int newScale, boolean div, long maxItemStack, long maxFluidStack) {
-        useSetScale(newScale, div, maxItemStack, maxFluidStack);
-    }
-
     public void setScale(int newScale, boolean div) {
-        long maxItemStack = 9999999L;
-        long maxFluidStack = 9999999L;
+        long maxItemStack = Long.MAX_VALUE;
+        long maxFluidStack = Long.MAX_VALUE;
         useSetScale(newScale, div, maxItemStack, maxFluidStack);
     }
 
