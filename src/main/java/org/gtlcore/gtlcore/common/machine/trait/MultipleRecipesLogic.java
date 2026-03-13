@@ -108,7 +108,9 @@ public class MultipleRecipesLogic extends RecipeLogic implements ILockRecipe, IR
             else if (p > 1) match = match.copy(ContentModifier.multiplier(p), false);
             ((IGTRecipe) match).setRealParallels(p);
             match = getRecipeOutputChance(machine, match);
-            if (handleRecipeInput(machine, match)) {
+            // 使用 HANDLE_PART_CACHE_ONLY 策略：禁止 non-simulate 将翻倍配方副本写入 ME 内部缓存
+            // (simulate pass 在 checkRecipe→matchRecipeInput 中已用 FULL_CACHE 正确缓存了 1x 原始配方)
+            if (handleRecipeInputNoMEInnerCache(machine, match)) {
                 remain -= p;
                 totalEu += getTotalEuOfRecipe(match) * euMultiplier;
                 var item = match.outputs.get(ItemRecipeCapability.CAP);

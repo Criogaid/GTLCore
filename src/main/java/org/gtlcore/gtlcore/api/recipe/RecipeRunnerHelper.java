@@ -84,4 +84,13 @@ public class RecipeRunnerHelper {
     public static boolean handleRecipeInputNocache(IRecipeLogicMachine holder, GTRecipe recipe) {
         return handleRecipe(IO.IN, holder, recipe.inputs, holder.getRecipeLogic().getChanceCaches(), true, recipe, false, RecipeCacheStrategy.NO_CACHE).isSuccess();
     }
+
+    /**
+     * 执行配方输入处理（non-simulate），但不更新 ME 内部缓存 (setSlotCacheRecipe)。
+     * 用于 MultipleRecipesLogic 等场景：避免将翻倍后的配方副本写入 recipeMultipleCacheMap。
+     * simulate pass (matchRecipeInput) 已使用 FULL_CACHE 正确缓存了 1x 原始配方。
+     */
+    public static boolean handleRecipeInputNoMEInnerCache(IRecipeLogicMachine holder, GTRecipe recipe) {
+        return handleRecipe(IO.IN, holder, recipe.inputs, holder.getRecipeLogic().getChanceCaches(), true, recipe, false, RecipeCacheStrategy.HANDLE_PART_CACHE_ONLY).isSuccess();
+    }
 }
